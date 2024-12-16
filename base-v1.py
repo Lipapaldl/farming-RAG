@@ -1,21 +1,20 @@
-import time
-import jwt
-import requests
 import streamlit as st #网页UI
 from langchain_community.embeddings import HuggingFaceEmbeddings#文本嵌入
-
 from langchain.document_loaders import UnstructuredFileLoader,PyPDFLoader #文件上传
-from langchain.docstore.document import Document #文档操作
-import os
 import tempfile #临时文件和目录创建
 import shutil #文件集合操作
-from FaissDB import *
+from FaissDB import * #向量数据库
+from RAG.RAGPrompt import * #RAG配置
+import jwt
+import time
+import requests
 
 #参数配置
 model_name_embedding = r'E:\hugging-face-model\BAAI\bge-small-zh-v1.5' #嵌入模型
 model_name_rerank = r'E:\hugging-face-model\BAAI\bge-reranker-base' #重排序模型
 # "7d0a347a309aa30360681614e8d51b69.rLCJISxoyHflCRmJ"
 knowledge_bases_path = "knowledge_bases"
+
 
 #LLM智谱大模型API
 def generate_token(apikey: str, exp_seconds: int):
@@ -39,8 +38,8 @@ def ask_glm(key,model,max_tokens,temperature,content):
     #智谱大模型
     url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     headers = {
-      'Content-Type': 'application/json',
-      'Authorization': generate_token(key, 1000)
+        'Content-Type': 'application/json',
+        'Authorization': generate_token(key, 1000)
     }
 
     data = {
@@ -51,6 +50,7 @@ def ask_glm(key,model,max_tokens,temperature,content):
     }
 
     response = requests.post(url, headers=headers, json=data)
+
     return response.json()
 
 #清除历史对话
@@ -144,30 +144,29 @@ if __name__ == '__main__':
                 if 'selected_kb' in st.session_state:
                     with st.spinner("查询中..."):
                         try:
+                            #读取向量库
                             kb = load_knowledge_base(knowledge_bases_path,st.session_state['selected_kb'],embeddings)
-                            docs = kb.similarity_search(user_input,k=5)
+                            #检索增强器
+                            rag = RAG(embeddings,model_name_rerank,kb)
                             #查询到的知识
-                            retrieved_knowledge = "\n".join([doc.page_content for doc in docs])
+                            retrieved_knowledge = rag.retrieve_documents(user_input)
+                            # 格式化文档内容为字符串
+                            retrieved_knowledge = rag.format_docs(retrieved_knowledge)
                             st.write("查询到的知识：" + retrieved_knowledge)
                         except Exception as e:
                             st.error(f"查询出错: {e}")
                 #写入大模型回答
                 with st.chat_message("assistant"):
                     with st.spinner("请求中..."):
+                        #使用了检索增强
                         if retrieved_knowledge:
-                            prompt = [
-                                {"role": "system",
-                                 "content": "你是一个专业的知识助手，以下是知识库中检索到的信息：\n" + retrieved_knowledge},
-                                {"role": "user", "content": user_input}
-                            ]
-                            full_response = \
-                                ask_glm(key, model, max_tokens, temperature, prompt)['choices'][0][
-                                    'message']['content']
-
+                            prompt = str(rag.simple_chunk(user_input))
+                            st.session_state.messages.append({"role": "user", "content": prompt})
+                            full_response = ask_glm(key, model, max_tokens, temperature, st.session_state.messages)['choices'][0]['message']['content']
+                        #未使用检索增强
                         else:
-
-                            full_response = \
-                            ask_glm(key, model, max_tokens, temperature, st.session_state.messages)['choices'][0]['message']['content']
+                            full_response = ask_glm(key, model, max_tokens, temperature, st.session_state.messages)['choices'][0]['message']['content']
+                        #写入UI
                         st.markdown(full_response)
                         message = {"role": "assistant", "content": full_response}
                         st.session_state.messages.append(message)
