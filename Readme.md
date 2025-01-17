@@ -72,7 +72,7 @@
 2. **修改API和模型路径**
     在LLM/chatglm.py中修改chatGLM_API 和 model_name（模型名称）
 
-    在Embedding/model.py中修改 ChineseBERTEmbeddingModelPath 嵌入模型路径
+    在Embedding/model.py中修改 file_path 本地模型保存路径
 
 3. **运行主程序**
     对PDF进行向量化存储:
