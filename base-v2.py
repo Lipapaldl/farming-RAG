@@ -2,7 +2,6 @@ import asyncio #异步
 import streamlit as st #UI
 from LLM.chatglm import ChatGLMModel #大模型接口
 import logging #日志库
-import pyperclip  # 引入 pyperclip 库，用于操作剪贴板
 
 # 配置日志记录，用于捕获和记录程序运行中的错误和信息
 logging.basicConfig(
@@ -11,8 +10,6 @@ logging.basicConfig(
     format='%(asctime)s - %(levelname)s - %(message)s'  # 日志格式
 )
 
-# 初始化模型实例，设置生成内容的温度参数（用于控制生成内容的随机性）
-model = ChatGLMModel(temperature=0.9)
 
 # 定义异步函数，用于通过模型处理用户问题
 async def chat_with_rag(message: str) -> str:
@@ -51,16 +48,12 @@ async def chat_with_retries(message: str, retries: int = 3, delay: int = 10):
 
     # 如果超过最大重试次数仍失败，返回错误信息
     return "Error: Unable to process your request after multiple attempts."
-
-# 定义示例问题的点击回调函数
-# 点击示例按钮后，将示例问题复制到剪贴板
+# 定义示例问题的按钮功能
+@st.cache_data()
 def set_example(example):
-    pyperclip.copy(example)  # 将示例问题复制到剪贴板
-    st.toast("示例问题已复制到剪贴板！")
-if __name__ == '__main__':
-    # 配置 Streamlit 页面布局和标题
-    st.set_page_config(page_title="《齐民要术》问答系统", layout="wide", initial_sidebar_state="expanded")
-
+    st.session_state["user_input"] = example  # 更新输入框的内容
+@st.cache_data()
+def main():
     # 页面标题与描述
     st.title("《齐民要术》问答系统")
     st.markdown(
@@ -70,6 +63,11 @@ if __name__ == '__main__':
         请输入您的问题，AI 将为您提供相关的答案。
         """
     )
+
+if __name__ == '__main__':
+    # 配置 Streamlit 页面布局和标题
+    st.set_page_config(page_title="《齐民要术》问答系统", layout="wide", initial_sidebar_state="expanded")
+    main()
     # 侧边栏：配置选项
     with st.sidebar:
         # 在侧边栏添加示例问题
@@ -78,22 +76,88 @@ if __name__ == '__main__':
         st.button("‘田间管理’章节中提到的灌溉方法有哪些？", on_click=set_example,args=("‘田间管理’章节中提到的灌溉方法有哪些？",))
         st.button("《齐民要术》中对桑树种植的建议是什么？", on_click=set_example,args=("《齐民要术》中对桑树种植的建议是什么？",))
         st.image("Img/齐民要术封面.jpg", caption="《齐民要术》", use_container_width=True)
+        
 
-    # 输入框，用于用户输入问题
-    user_input = st.text_input(
-        "输入你的问题",  # 输入框的标签
-        placeholder="例如：‘耕田应注意哪些事项？’"  # 输入框的占位符
-    )
+    # 初始化 Session State
+    if "user_input" not in st.session_state:
+        st.session_state["user_input"] = ""
+    with st.sidebar:
+        st.title("模型与算法配置")
 
-    # 主界面按钮，用于提交用户输入的问题并获取答案
-    if st.button("提交问题"):
-        if user_input:
-            # 如果输入框有内容，显示处理中的提示
-            st.write("正在处理您的问题，请稍候...")
-            # 调用带重试机制的函数获取回答
-            result = asyncio.run(chat_with_retries(user_input))
-            # 显示回答内容
-            st.text_area("AI的回答", value=result, height=200)
-        else:
-            # 如果输入框为空，显示警告信息
-            st.warning("请输入您的问题后再提交！")
+        # Embedding 模型选择
+        st.subheader("Embedding 模型")
+        embedding_model = st.selectbox(
+            "选择用于嵌入向量生成的模型：",
+            options=["google-bert/bert-base-chinese", "maidalun1020/bce-embedding-base_v1"],
+            index=0,
+            key="embedding_model"
+        )
+
+        # Rerank 模型选择
+        st.subheader("Rerank 模型")
+        rerank_model = st.selectbox(
+            "请选择用于重排序的模型：",
+            options=["BAAI/bge-reranker-base", "BM25"],
+            index=0,
+            key="rerank_model"
+        )
+
+        # 相似度计算算法选择
+        st.subheader("匹配算法")
+        similarity_algorithm = st.selectbox(
+            "请选择相似度计算方式：",
+            options=["cosine", "euclidean", "weighted_cosine"],
+            index=0,
+            key="similarity_algorithm"
+        )
+
+        # LLM 模型选择
+        st.subheader("LLM 模型")
+        llm_model = st.selectbox(
+            "请选择大语言模型：",
+            options=["glm-3-turbo"],
+            index=0,
+            key="llm_model"
+        )
+
+        # 分割线
+        st.markdown("---")
+
+        # 显示用户当前选择的配置
+        st.subheader("当前选择的配置")
+        st.write(f"**Embedding 模型**: {st.session_state['embedding_model']}")
+        st.write(f"**Rerank 模型**: {st.session_state['rerank_model']}")
+        st.write(f"**相似度计算算法**: {st.session_state['similarity_algorithm']}")
+        st.write(f"**LLM 模型**: {st.session_state['llm_model']}")
+
+    # 初始化模型实例，设置生成内容的温度参数（用于控制生成内容的随机性）
+    model = ChatGLMModel(temperature=0.9,
+                         Embedding=st.session_state['embedding_model'],
+                         Rerank=st.session_state['rerank_model'],
+                         similarity_algorithm=st.session_state['similarity_algorithm'])
+
+    # 主要内容区域：问答输入框
+    with st.form("question_form"):
+        user_input = st.text_input(label="请输入您的问题：",
+                                   placeholder="例如：‘耕田应注意哪些事项？’",
+                                   value=st.session_state["user_input"],  # 设置为 Session State 中的内容
+                                   max_chars=200)
+         
+        submit = st.form_submit_button("提交问题")
+        if submit:
+            if user_input:
+                st.write("正在处理您的问题，请稍候...")
+                result = asyncio.run(chat_with_retries(user_input))
+                if 'info' in result:
+                    info = result['info']
+                    st.subheader("检索到的相关文档及得分")
+                    # 按照得分降序排列
+                    table_data = sorted(
+                        [{"文档": doc, "得分": round(score, 4)} for doc, score in info],
+                        key=lambda x: x["得分"],
+                        reverse=True  # 降序排列
+                    )
+                    st.table(table_data)
+                st.text_area("AI的回答", value=result['result'], height=200)
+            else:
+                st.warning("请输入您的问题后再提交！")    
